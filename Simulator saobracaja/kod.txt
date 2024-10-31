@@ -1,0 +1,348 @@
+void serialize(const std::string &filename) const
+    {
+        std::ofstream outfile(filename);
+
+        // Prvi red - čvorovi lokacija
+        for (const auto &[id, node] : nodes)
+        {
+            if (std::dynamic_pointer_cast<LocationNode>(node))
+            {
+                outfile << id << ",";
+            }
+        }
+        outfile.seekp(-1, std::ios_base::end); // Sklanjamo poslednji zarez
+        outfile << ".\n";
+
+        // Drugi red - čvorovi raskrsnica
+        for (const auto &[id, node] : nodes)
+        {
+            if (auto intersection = std::dynamic_pointer_cast<IntersectionNode>(node))
+            {
+                outfile << "(" << intersection->getIdentifier() << "," << intersection->getMaxVehicles() << "),";
+            }
+        }
+        outfile.seekp(-1, std::ios_base::end); // Sklanjamo poslednji zarez
+        outfile << ".\n";
+
+        // Treći red - čvorovi puteva
+        for (const auto &[id, node] : nodes)
+        {
+            if (auto road = std::dynamic_pointer_cast<RoadNode>(node))
+            {
+                outfile << "(" << road->getIdentifier() << "," << road->getStartNode()->getIdentifier() << ","
+                        << road->getEndNode()->getIdentifier() << "," << road->getLength() << ","
+                        << road->getMaxSpeed() << "," << road->getMaxVehicles() << "),";
+            }
+        }
+        outfile.seekp(-1, std::ios_base::end); // Sklanjamo poslednji zarez
+        outfile << ".\n";
+
+        // Četvrti red - veze između puteva na raskrsnicama
+        for (const auto &[id, node] : nodes)
+        {
+            if (auto intersection = std::dynamic_pointer_cast<IntersectionNode>(node))
+            {
+                const auto &connections = intersection->getConnections();
+                for (const auto &[inRoad, outRoads] : connections)
+                {
+                    outfile << "(" << intersection->getIdentifier() << "," << inRoad->getIdentifier() << ",{";
+                    for (const auto &[outRoad, length] : outRoads)
+                    {
+                        outfile << outRoad->getIdentifier() << "," << length << ",";
+                    }
+                    outfile.seekp(-1, std::ios_base::end); // Sklanjamo poslednji zarez
+                    outfile << "}),";
+                }
+            }
+        }
+        outfile.seekp(-1, std::ios_base::end); // Sklanjamo poslednji zarez
+        outfile << ".\n";
+
+        outfile.close();
+    }
+
+
+    void deserialize(const std::string &filename)
+    {
+        std::ifstream infile(filename);
+        if (!infile.is_open())
+        {
+            std::cerr << "Error: Unable to open file for reading." << std::endl;
+            return;
+        }
+
+        std::string line;
+        // Prvi red - čvorovi lokacija
+        if (std::getline(infile, line))
+        {
+            std::istringstream locations_ss(line);
+            std::string locationId;
+            while (std::getline(locations_ss, locationId, ','))
+            {
+                addLocation(locationId);
+            }
+        }
+        else
+        {
+            std::cerr << "Error: Missing location information." << std::endl;
+            return;
+        }
+
+        // Drugi red - čvorovi raskrsnica
+        if (std::getline(infile, line))
+        {
+            std::istringstream intersections_ss(line);
+            std::string intersectionInfo;
+            while (std::getline(intersections_ss, intersectionInfo, ','))
+            {
+                std::istringstream intersectionInfo_ss(intersectionInfo);
+                std::string intersectionId, maxVehiclesStr;
+                std::getline(intersectionInfo_ss, intersectionId, '(');
+                std::getline(intersectionInfo_ss, maxVehiclesStr, ')');
+                int maxVehicles = std::stoi(maxVehiclesStr);
+                addIntersection(intersectionId, maxVehicles);
+            }
+        }
+        else
+        {
+            std::cerr << "Error: Missing intersection information." << std::endl;
+            return;
+        }
+
+        // Treći red - čvorovi puteva
+        if (std::getline(infile, line))
+        {
+            std::istringstream roads_ss(line);
+            std::string roadInfo;
+            while (std::getline(roads_ss, roadInfo, ','))
+            {
+                std::istringstream roadInfo_ss(roadInfo);
+                std::string roadId, startId, endId, lengthStr, maxSpeedStr, maxVehiclesStr;
+                std::getline(roadInfo_ss, roadId, '(');
+                std::getline(roadInfo_ss, startId, ',');
+                std::getline(roadInfo_ss, endId, ',');
+                std::getline(roadInfo_ss, lengthStr, ',');
+                std::getline(roadInfo_ss, maxSpeedStr, ',');
+                std::getline(roadInfo_ss, maxVehiclesStr, ')');
+                double length = std::stod(lengthStr);
+                double maxSpeed = std::stod(maxSpeedStr);
+                int maxVehicles = std::stoi(maxVehiclesStr);
+                addRoad(roadId, startId, endId, length, maxSpeed, maxVehicles);
+            }
+        }
+        else
+        {
+            std::cerr << "Error: Missing road information." << std::endl;
+            return;
+        }
+
+        // Četvrti red - veze između puteva na raskrsnicama
+        if (std::getline(infile, line))
+        {
+            std::istringstream connections_ss(line);
+            std::string connectionInfo;
+            while (std::getline(connections_ss, connectionInfo, ','))
+            {
+                std::istringstream connectionInfo_ss(connectionInfo);
+                std::string intersectionId, inRoadId, connectionsInfo;
+                std::getline(connectionInfo_ss, intersectionId, '(');
+                std::getline(connectionInfo_ss, inRoadId, ',');
+                std::getline(connectionInfo_ss, connectionsInfo, '}');
+                std::istringstream connectionsInfo_ss(connectionsInfo);
+                std::string outRoadId;
+                double length;
+                while (connectionsInfo_ss >> outRoadId >> length)
+                {
+                    connectRoads(intersectionId, inRoadId, {{outRoadId, length}});
+                }
+            }
+        }
+        else
+        {
+            std::cerr << "Error: Missing connection information." << std::endl;
+            return;
+        }
+
+        infile.close();
+    }
+
+    void printGraph() const
+    {
+        std::cout << "Graf saobracajne mreze:\n";
+
+        // Iteracija kroz sve čvorove i ispis informacija
+        for (const auto &[id, node] : nodes)
+        {
+            std::cout << "Cvor: " << id << "\n";
+
+            if (auto intersection = std::dynamic_pointer_cast<IntersectionNode>(node))
+            {
+                std::cout << "  Raskrsnica\n";
+                const auto &connections = intersection->getConnections();
+
+                for (const auto &[inRoadPtr, outRoads] : connections)
+                {
+                    std::string inRoadId = inRoadPtr->getIdentifier(); // Pretpostavljamo da RoadNode ima metodu getIdentifier()
+                    std::cout << "  Ulazni put: " << inRoadId << "\n";
+
+                    for (const auto &[outRoadPtr, length] : outRoads)
+                    {
+                        std::string outRoadId = outRoadPtr->getIdentifier(); // Pretpostavljamo da RoadNode ima metodu getIdentifier()
+                        std::cout << "    Izlazni put: " << outRoadId << " Duzina: " << length << "m\n";
+                    }
+                }
+            }
+            else if (auto road = std::dynamic_pointer_cast<RoadNode>(node))
+            {
+                std::cout << "  Put\n";
+                // Ispis dodatnih detalja za put
+            }
+            else if (auto location = std::dynamic_pointer_cast<LocationNode>(node))
+            {
+                std::cout << "  Lokacija\n";
+                // Ispis dodatnih detalja za lokaciju
+            }
+        }
+    }
+
+
+    bool isRoadFull(const Vehicle &vehicle) const
+    {
+        auto currentLocation = vehicle.getCurrentLocation();
+        if (auto roadNode = std::dynamic_pointer_cast<RoadNode>(currentLocation))
+        {
+            // Provjeravamo da li je broj vozila na putu veći ili jednak maksimalnom broju vozila na putu
+            return roadNode->getCurrentVehicles() >= roadNode->getMaxVehicles();
+        }
+        return false; // Ako vozilo nije na putu, put se smatra slobodnim
+    }
+
+    void executeSimulationStep()
+    {
+        for (auto &vehicle : vehicles)
+        {
+            if (vehicle.getCurrentLocation() != vehicle.getDestination())
+            {
+                if (!isRoadFull(vehicle))
+                {
+                    vehicle.move();
+                }
+            }
+        }
+
+        // Pauziranje simulacije za definisano trajanje koraka
+        std::this_thread::sleep_for(std::chrono::seconds(static_cast<int>(simulationStepDuration)));
+
+        // Provera da li su sva vozila stigla do krajnje destinacije
+        if (allVehiclesReachedDestination())
+        {
+            showSimulationState();
+            std::cout << "All vehicles reached their destinations. Simulation complete." << std::endl;
+        }
+    }
+
+    void move()
+    {
+        if (bestPath.empty())
+        {
+            throw std::runtime_error("Best path not calculated or no path available.");
+        }
+
+        // Remove the current location and the road leading to the next location
+        if (bestPath.size() >= 2)
+        {
+            bestPath.erase(bestPath.begin(), bestPath.begin() + 1);
+        }
+        else
+        {
+            bestPath.clear(); // Clear the remaining path if it has less than two nodes
+        }
+
+        if (!bestPath.empty())
+        {
+            currentLocation = bestPath.front(); // Update the current location to the next node in the path
+        }
+    }
+
+    void executeSimulationStep()
+    {
+        for (auto &vehicle : this->vehicles)
+        {
+            if (vehicle.getCurrentLocation() != vehicle.getDestination())
+            {
+                if (auto nextNode = std::dynamic_pointer_cast<RoadNode>(vehicle.getNextNode()))
+                {
+                    if (!this->isRoadFull(nextNode))
+                    {
+                        
+                    }
+                }
+                if (auto roadNode = std::dynamic_pointer_cast<RoadNode>(vehicle.getCurrentLocation()))
+                {
+                    if (!this->isRoadFull(roadNode))
+                    {
+                        double distanceToTravel = std::min(roadNode->getMaxSpeed(), vehicle.getAverageSpeed()) * this->simulationStepDuration / 3600;
+                        roadNode->decreaseLength(distanceToTravel);
+                        if (roadNode->getLength() <= 0)
+                        {
+                            vehicle.move();
+                            roadNode->decreaseCurrentVehicles();
+                        }
+                    }
+                }
+                // Ako nije cvor puta
+                else
+                {
+                    vehicle.move();
+                }
+            }
+        }
+
+        // Pauziranje simulacije za definisano trajanje koraka
+        std::this_thread::sleep_for(std::chrono::seconds(static_cast<int>(1)));
+
+        // Provera da li su sva vozila stigla do krajnje destinacije
+        if (this->allVehiclesReachedDestination())
+        {
+            for (const auto &vehicle : this->vehicles)
+            {
+                this->travelTimes.push_back(vehicle.getTravelTime());
+            }
+
+            this->showSimulationState();
+            std::cout << "All vehicles reached their destinations. Simulation complete." << std::endl;
+        }
+        else
+            std::cout << "Simulation is not complete yet." << std::endl;
+    }
+
+
+    else if (auto nextNode = std::dynamic_pointer_cast<RoadNode>(vehicle.getNextNode()))
+                {
+                    if (!nextNode->isRoadFull())
+                    {
+                        vehicle.move();
+                        nextNode->increaseCurrentVehicles();
+                    }
+                }
+                else if (auto currentNode = std::dynamic_pointer_cast<RoadNode>(vehicle.getCurrentLocation()))
+                {
+                    double distanceToTravel = std::min(currentNode->getMaxSpeed(), vehicle.getAverageSpeed()) * this->simulationStepDuration / 3600;
+                    vehicle.getRoadLengths().front() -= distanceToTravel;
+                    if (vehicle.getRoadLengths().front() <= 0)
+                    {
+                        if (auto nextNode = std::dynamic_pointer_cast<IntersectionNode>(vehicle.getNextNode()))
+                        {
+                            if (!nextNode->isInterSectionFull())
+                            {
+                                vehicle
+                            }
+                        }
+                        vehicle.move();
+                        currentNode->decreaseCurrentVehicles();
+                        if (vehicle.getRoadLengths().front() < 0.0)
+                        {
+                            this->decreaseLengthNextRoadNode(vehicle);
+                        }
+                    }
+                }
